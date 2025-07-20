@@ -1,0 +1,303 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tube Detection System</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --main: #1e88e5;
+      --dark-bg: #121212;
+      --dark-panel: #1e1e1e;
+      --light-panel: #f2f2f2;
+      --text: #fff;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      background-color: var(--dark-bg);
+      color: var(--text);
+    }
+
+    header {
+      background: linear-gradient(to right, #1976d2, #42a5f5);
+      padding: 20px;
+      font-size: 24px;
+      text-align: center;
+      font-weight: 600;
+      color: white;
+    }
+
+    .toolbar {
+      text-align: center;
+      margin: 20px;
+    }
+
+    .toolbar input[type="file"] {
+      margin: 10px;
+    }
+
+    .toolbar button {
+      margin: 5px;
+      padding: 10px 16px;
+      background-color: var(--main);
+      border: none;
+      border-radius: 5px;
+      color: white;
+      cursor: pointer;
+    }
+
+    .toolbar button:hover {
+      background-color: #1565c0;
+    }
+
+    #canvas-container {
+      text-align: center;
+      margin: 20px auto;
+    }
+
+    canvas {
+      border: 2px solid #555;
+      border-radius: 6px;
+      max-width: 100%;
+    }
+
+    #tubeCount {
+      font-size: 22px;
+      font-weight: bold;
+      text-align: center;
+      margin-top: 10px;
+    }
+
+    .footer {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-around;
+      background-color: var(--dark-panel);
+      padding: 20px;
+      margin-top: 30px;
+    }
+
+    .footer .panel {
+      flex: 1 1 200px;
+      margin: 10px;
+      padding: 15px;
+      background-color: #2c2c2c;
+      border-radius: 10px;
+    }
+
+    .footer h4 {
+      margin-bottom: 10px;
+    }
+
+    .gallery img {
+      width: 60px;
+      height: 60px;
+      object-fit: cover;
+      margin: 5px;
+      border-radius: 4px;
+    }
+
+    #spinner {
+      display: none;
+      text-align: center;
+      margin: 20px auto;
+    }
+
+    .loader {
+      border: 6px solid #f3f3f3;
+      border-top: 6px solid var(--main);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: auto;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0); }
+      100% { transform: rotate(360deg); }
+    }
+
+    @media screen and (max-width: 768px) {
+      header { font-size: 20px; }
+      .toolbar button { padding: 8px 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>Tube Detection System</header>
+
+<div id="tubeCount">Total Tubes Detected: —</div>
+
+<div class="toolbar">
+  <input type="file" id="fileInput" accept="image/*">
+  <button onclick="setMode('rect')">Rectangle ROI</button>
+  <button onclick="setMode('poly')">Polygon ROI</button>
+  <button onclick="runDetection()">Run Detection</button>
+  <button onclick="downloadImage()">Download Result</button>
+</div>
+
+<div id="canvas-container">
+  <canvas id="canvas" width="640" height="480"></canvas>
+</div>
+
+<div id="spinner"><div class="loader"></div><p>Detecting, please wait...</p></div>
+
+<div class="footer">
+  <div class="panel">
+    <h4>Webcam Capture</h4>
+    <button onclick="alert('Webcam integration coming soon!')">Start Webcam</button>
+  </div>
+
+  <div class="panel">
+    <h4>Suggest ROI</h4>
+    <button onclick="alert('AI suggestion feature coming soon!')">Suggest ROI</button>
+  </div>
+
+  <div class="panel">
+    <h4>Session Log (Today)</h4>
+    <canvas id="barGraph" width="150" height="100"></canvas>
+  </div>
+
+  <div class="panel gallery">
+    <h4>Image Gallery</h4>
+    <img src="static/sample1.jpg">
+    <img src="static/sample2.jpg">
+    <img src="static/sample3.jpg">
+  </div>
+</div>
+
+<script>
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  let image = null, roiType = null;
+  let rect = {}, isDrawing = false, startX, startY, polyPoints = [];
+
+  document.getElementById("fileInput").addEventListener("change", function (e) {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = function (event) {
+      image = new Image();
+      image.onload = function () {
+        canvas.width = image.width;
+        canvas.height = image.height;
+        ctx.drawImage(image, 0, 0);
+      };
+      image.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  function setMode(mode) {
+    roiType = mode;
+    polyPoints = [];
+    if (image) ctx.drawImage(image, 0, 0);
+  }
+
+  canvas.addEventListener("mousedown", (e) => {
+    if (!roiType) return;
+    const rectCanvas = canvas.getBoundingClientRect();
+    const x = e.clientX - rectCanvas.left;
+    const y = e.clientY - rectCanvas.top;
+
+    if (roiType === "rect") {
+      isDrawing = true;
+      startX = x;
+      startY = y;
+    } else if (roiType === "poly") {
+      polyPoints.push([x, y]);
+      redrawPolygon();
+    }
+  });
+
+  canvas.addEventListener("mousemove", (e) => {
+    if (isDrawing && roiType === "rect") {
+      const rectCanvas = canvas.getBoundingClientRect();
+      const x = e.clientX - rectCanvas.left;
+      const y = e.clientY - rectCanvas.top;
+      const w = x - startX, h = y - startY;
+      ctx.drawImage(image, 0, 0);
+      ctx.strokeStyle = "lime";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(startX, startY, w, h);
+    }
+  });
+
+  canvas.addEventListener("mouseup", (e) => {
+    if (roiType === "rect" && isDrawing) {
+      isDrawing = false;
+      const rectCanvas = canvas.getBoundingClientRect();
+      const x = e.clientX - rectCanvas.left;
+      const y = e.clientY - rectCanvas.top;
+      rect = { x: startX, y: startY, w: x - startX, h: y - startY };
+    }
+  });
+
+  canvas.addEventListener("dblclick", () => {
+    if (roiType === "poly" && polyPoints.length >= 3) redrawPolygon(true);
+  });
+
+  function redrawPolygon(close = false) {
+    ctx.drawImage(image, 0, 0);
+    ctx.beginPath();
+    ctx.moveTo(polyPoints[0][0], polyPoints[0][1]);
+    for (let i = 1; i < polyPoints.length; i++) {
+      ctx.lineTo(polyPoints[i][0], polyPoints[i][1]);
+    }
+    if (close) ctx.closePath();
+    ctx.strokeStyle = "cyan";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = "rgba(0,255,255,0.1)";
+    if (close) ctx.fill();
+  }
+
+  async function runDetection() {
+    const file = document.getElementById("fileInput").files[0];
+    if (!file || !roiType) return alert("Upload an image and choose ROI.");
+    document.getElementById("spinner").style.display = "block";
+
+    const formData = new FormData();
+    formData.append("image", file);
+    if (roiType === "rect") {
+      formData.append("roi", JSON.stringify([
+        [rect.x, rect.y],
+        [rect.x + rect.w, rect.y],
+        [rect.x + rect.w, rect.y + rect.h],
+        [rect.x, rect.y + rect.h]
+      ]));
+    } else {
+      formData.append("roi", JSON.stringify(polyPoints));
+    }
+
+    const res = await fetch("/detect", {
+      method: "POST",
+      body: formData
+    });
+
+    const result = await res.json();
+    ctx.drawImage(image, 0, 0);
+    ctx.strokeStyle = "blue";
+    result.boxes.forEach(b => {
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+    });
+
+    document.getElementById("tubeCount").innerText = `Total Tubes Detected: ${result.count}`;
+    document.getElementById("spinner").style.display = "none";
+  }
+
+  function downloadImage() {
+    const link = document.createElement('a');
+    link.download = 'tube_detection_result.png';
+    link.href = canvas.toDataURL();
+    link.click();
+  }
+</script>
+
+</body>
+</html>

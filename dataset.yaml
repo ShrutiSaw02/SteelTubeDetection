@@ -1,0 +1,7 @@
+path: ./dataset
+
+train: images/train
+val: images/train  # using train as val set due to limited data
+
+names:
+  0: tube
